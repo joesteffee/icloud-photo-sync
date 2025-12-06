@@ -49,8 +49,6 @@ func (s *Sender) SendImage(imagePath string, destination string) error {
 
 	// Create dialer
 	d := mail.NewDialer(s.smtpConfig.Server, s.smtpConfig.Port, s.smtpConfig.Username, s.smtpConfig.Password)
-	// Try OpportunisticStartTLS first (will use TLS if available, otherwise plain)
-	d.StartTLSPolicy = mail.OpportunisticStartTLS
 	
 	// Skip certificate verification for self-signed or mismatched certificates
 	// This is common with local SMTP servers like ProtonMail Bridge
@@ -59,12 +57,25 @@ func (s *Sender) SendImage(imagePath string, destination string) error {
 		ServerName:         s.smtpConfig.Server,
 	}
 
+	// For port 25, ProtonMail Bridge typically requires STARTTLS for authentication
+	// Try MandatoryStartTLS first (required for authentication on port 25)
+	if s.smtpConfig.Port == 25 {
+		d.StartTLSPolicy = mail.MandatoryStartTLS
+	} else {
+		// For other ports, try opportunistic STARTTLS
+		d.StartTLSPolicy = mail.OpportunisticStartTLS
+	}
+
 	// Send email
 	if err := d.DialAndSend(m); err != nil {
-		// If STARTTLS fails, try without it (some SMTP servers don't support it)
-		d.StartTLSPolicy = mail.NoStartTLS
-		if err2 := d.DialAndSend(m); err2 != nil {
-			return fmt.Errorf("failed to send email (with and without STARTTLS): %w (original: %v)", err2, err)
+		// If MandatoryStartTLS fails on port 25, try OpportunisticStartTLS as fallback
+		if s.smtpConfig.Port == 25 && d.StartTLSPolicy == mail.MandatoryStartTLS {
+			d.StartTLSPolicy = mail.OpportunisticStartTLS
+			if err2 := d.DialAndSend(m); err2 != nil {
+				return fmt.Errorf("failed to send email on port 25 (tried MandatoryStartTLS and OpportunisticStartTLS): %w (original: %v)", err2, err)
+			}
+		} else {
+			return fmt.Errorf("failed to send email: %w", err)
 		}
 	}
 
