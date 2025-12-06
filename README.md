@@ -28,6 +28,7 @@ A Go-based Docker service that periodically scrapes iCloud shared albums, downlo
 | `SMTP_PORT` | SMTP server port | Yes | - |
 | `SMTP_USERNAME` | SMTP username | Yes | - |
 | `SMTP_PASSWORD` | SMTP password | Yes | - |
+| `SMTP_FROM` | Email address for Reply-To header. The "From" header will always use `SMTP_USERNAME` to match the authenticated user (required by some SMTP servers like ProtonMail Bridge). | No | `SMTP_USERNAME` |
 | `SMTP_DESTINATION` | Email address to send photos to | Yes | - |
 | `RUN_INTERVAL` | Seconds between runs | No | 3600 |
 | `MAX_ITEMS` | Maximum number of photos to email per run | No | 5 |
@@ -51,12 +52,15 @@ A Go-based Docker service that periodically scrapes iCloud shared albums, downlo
      -e SMTP_PORT="587" \
      -e SMTP_USERNAME="your-email@gmail.com" \
      -e SMTP_PASSWORD="your-password" \
+     -e SMTP_FROM="photoframe@example.com" \
      -e SMTP_DESTINATION="photo-frame@example.com" \
      -e RUN_INTERVAL="3600" \
      -e MAX_ITEMS="5" \
      -v /path/to/images:/images \
      icloud-photo-sync:latest
    ```
+
+   **Note:** Some SMTP servers (like ProtonMail Bridge) require the "From" address to match the authenticated username. In this case, the service will use `SMTP_USERNAME` as the "From" address and `SMTP_FROM` (if provided) as the "Reply-To" header. The service also supports self-signed certificates and will skip certificate verification when needed.
 
 ### Local Go
 

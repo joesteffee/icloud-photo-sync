@@ -8,10 +8,11 @@ import (
 
 // SMTPConfig holds SMTP configuration
 type SMTPConfig struct {
-	Server string
-	Port   int
+	Server   string
+	Port     int
 	Username string
 	Password string
+	From     string // Optional "From" email address (defaults to Username if not set)
 }
 
 // Config holds all application configuration
@@ -64,11 +65,18 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("SMTP_PASSWORD is required")
 	}
 
+	// Optional SMTP_FROM environment variable
+	smtpFrom := os.Getenv("SMTP_FROM")
+	if smtpFrom == "" {
+		smtpFrom = smtpUsername // Default to username if not specified
+	}
+
 	cfg.SMTPConfig = &SMTPConfig{
 		Server:   smtpServer,
 		Port:     smtpPort,
 		Username: smtpUsername,
 		Password: smtpPassword,
+		From:     smtpFrom,
 	}
 
 	cfg.SMTPDestination = os.Getenv("SMTP_DESTINATION")

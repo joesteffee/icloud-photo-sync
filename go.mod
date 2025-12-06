@@ -3,6 +3,7 @@ module github.com/jsteffee/icloud-photo-sync
 go 1.18
 
 require (
+	github.com/Shogoki/icloud-shared-album-go v0.2.0
 	github.com/redis/go-redis/v9 v9.5.1
 	gopkg.in/mail.v2 v2.3.1
 )
