@@ -36,10 +36,15 @@ func main() {
 		log.Fatalf("Failed to initialize email sender: %v", err)
 	}
 
-	albumScraper := scraper.NewScraper(cfg.ICloudAlbumURL)
+	// Create scrapers for each album URL
+	albumScrapers := make([]*scraper.Scraper, 0, len(cfg.AlbumURLs))
+	for _, albumURL := range cfg.AlbumURLs {
+		albumScrapers = append(albumScrapers, scraper.NewScraper(albumURL))
+	}
 
 	log.Printf("Starting iCloud Photo Sync Service")
-	log.Printf("Album URL: %s", cfg.ICloudAlbumURL)
+	log.Printf("Album URLs: %v", cfg.AlbumURLs)
+	log.Printf("Number of albums: %d", len(cfg.AlbumURLs))
 	log.Printf("Run interval: %d seconds", cfg.RunInterval)
 	log.Printf("Max items per run: %d", cfg.MaxItems)
 	log.Printf("Image directory: %s", cfg.ImageDir)
@@ -49,7 +54,7 @@ func main() {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
 	// Run initial sync
-	runSync(albumScraper, storageManager, redisClient, emailSender, cfg)
+	runSync(albumScrapers, storageManager, redisClient, emailSender, cfg)
 
 	// Set up ticker for periodic runs
 	ticker := time.NewTicker(time.Duration(cfg.RunInterval) * time.Second)
@@ -59,7 +64,7 @@ func main() {
 	for {
 		select {
 		case <-ticker.C:
-			runSync(albumScraper, storageManager, redisClient, emailSender, cfg)
+			runSync(albumScrapers, storageManager, redisClient, emailSender, cfg)
 		case <-sigChan:
 			log.Println("Received shutdown signal, exiting...")
 			return
@@ -68,7 +73,7 @@ func main() {
 }
 
 func runSync(
-	albumScraper *scraper.Scraper,
+	albumScrapers []*scraper.Scraper,
 	storageManager *storage.Manager,
 	redisClient *redis.Client,
 	emailSender *email.Sender,
@@ -76,17 +81,22 @@ func runSync(
 ) {
 	log.Println("Starting sync run...")
 
-	// Scrape album for image URLs
-	imageURLs, err := albumScraper.GetImageURLs()
-	if err != nil {
-		log.Printf("Error scraping album: %v", err)
-		return
+	// Collect image URLs from all albums
+	var allImageURLs []string
+	for i, albumScraper := range albumScrapers {
+		imageURLs, err := albumScraper.GetImageURLs()
+		if err != nil {
+			log.Printf("Error scraping album %d: %v", i+1, err)
+			continue
+		}
+		log.Printf("Found %d image URLs in album %d", len(imageURLs), i+1)
+		allImageURLs = append(allImageURLs, imageURLs...)
 	}
 
-	log.Printf("Found %d image URLs in album", len(imageURLs))
+	log.Printf("Found %d total image URLs across all albums", len(allImageURLs))
 
 	emailedCount := 0
-	for _, imageURL := range imageURLs {
+	for _, imageURL := range allImageURLs {
 		if emailedCount >= cfg.MaxItems {
 			log.Printf("Reached MAX_ITEMS limit (%d), stopping for this run", cfg.MaxItems)
 			break

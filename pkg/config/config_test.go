@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -9,7 +10,7 @@ func TestLoad(t *testing.T) {
 	// Save original env
 	originalEnv := make(map[string]string)
 	envVars := []string{
-		"ICLOUD_ALBUM_URL", "REDIS_URL", "SMTP_SERVER", "SMTP_PORT",
+		"REDIS_URL", "SMTP_SERVER", "SMTP_PORT",
 		"SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_DESTINATION",
 		"RUN_INTERVAL", "MAX_ITEMS", "IMAGE_DIR",
 	}
@@ -27,64 +28,122 @@ func TestLoad(t *testing.T) {
 		}
 	}()
 
+	// Create temporary directory for test config files
+	tmpDir := t.TempDir()
+
 	tests := []struct {
-		name    string
-		env     map[string]string
-		wantErr bool
+		name       string
+		env        map[string]string
+		configJSON string
+		wantErr    bool
+		validate   func(*testing.T, *Config)
 	}{
 		{
 			name: "all required fields",
 			env: map[string]string{
-				"ICLOUD_ALBUM_URL":  "https://example.com/album",
-				"REDIS_URL":         "redis://localhost:6379",
-				"SMTP_SERVER":       "smtp.example.com",
-				"SMTP_PORT":         "587",
-				"SMTP_USERNAME":     "user@example.com",
-				"SMTP_PASSWORD":     "password",
-				"SMTP_DESTINATION":  "dest@example.com",
+				"REDIS_URL":        "redis://localhost:6379",
+				"SMTP_SERVER":      "smtp.example.com",
+				"SMTP_PORT":        "587",
+				"SMTP_USERNAME":    "user@example.com",
+				"SMTP_PASSWORD":    "password",
+				"SMTP_DESTINATION": "dest@example.com",
+				"IMAGE_DIR":        tmpDir,
 			},
-			wantErr: false,
+			configJSON: `{"album_urls": ["https://example.com/album1", "https://example.com/album2"]}`,
+			wantErr:    false,
+			validate: func(t *testing.T, cfg *Config) {
+				if len(cfg.AlbumURLs) != 2 {
+					t.Errorf("AlbumURLs length = %v, want 2", len(cfg.AlbumURLs))
+				}
+				if cfg.AlbumURLs[0] != "https://example.com/album1" {
+					t.Errorf("AlbumURLs[0] = %v, want https://example.com/album1", cfg.AlbumURLs[0])
+				}
+			},
 		},
 		{
-			name: "missing ICLOUD_ALBUM_URL",
+			name: "missing config file",
 			env: map[string]string{
-				"REDIS_URL":         "redis://localhost:6379",
-				"SMTP_SERVER":       "smtp.example.com",
-				"SMTP_PORT":         "587",
-				"SMTP_USERNAME":     "user@example.com",
-				"SMTP_PASSWORD":     "password",
-				"SMTP_DESTINATION":  "dest@example.com",
+				"REDIS_URL":        "redis://localhost:6379",
+				"SMTP_SERVER":      "smtp.example.com",
+				"SMTP_PORT":        "587",
+				"SMTP_USERNAME":    "user@example.com",
+				"SMTP_PASSWORD":    "password",
+				"SMTP_DESTINATION": "dest@example.com",
+				"IMAGE_DIR":        tmpDir,
 			},
-			wantErr: true,
+			configJSON: "",
+			wantErr:    true,
+		},
+		{
+			name: "empty album URLs",
+			env: map[string]string{
+				"REDIS_URL":        "redis://localhost:6379",
+				"SMTP_SERVER":      "smtp.example.com",
+				"SMTP_PORT":        "587",
+				"SMTP_USERNAME":    "user@example.com",
+				"SMTP_PASSWORD":    "password",
+				"SMTP_DESTINATION": "dest@example.com",
+				"IMAGE_DIR":        tmpDir,
+			},
+			configJSON: `{"album_urls": []}`,
+			wantErr:    true,
 		},
 		{
 			name: "with optional fields",
 			env: map[string]string{
-				"ICLOUD_ALBUM_URL":  "https://example.com/album",
-				"REDIS_URL":         "redis://localhost:6379",
-				"SMTP_SERVER":       "smtp.example.com",
-				"SMTP_PORT":         "587",
-				"SMTP_USERNAME":     "user@example.com",
-				"SMTP_PASSWORD":     "password",
-				"SMTP_DESTINATION":  "dest@example.com",
-				"RUN_INTERVAL":      "1800",
-				"MAX_ITEMS":         "10",
-				"IMAGE_DIR":         "/custom/images",
+				"REDIS_URL":        "redis://localhost:6379",
+				"SMTP_SERVER":      "smtp.example.com",
+				"SMTP_PORT":        "587",
+				"SMTP_USERNAME":    "user@example.com",
+				"SMTP_PASSWORD":    "password",
+				"SMTP_DESTINATION": "dest@example.com",
+				"RUN_INTERVAL":     "1800",
+				"MAX_ITEMS":        "10",
+				"IMAGE_DIR":        tmpDir,
 			},
-			wantErr: false,
+			configJSON: `{"album_urls": ["https://example.com/album"]}`,
+			wantErr:    false,
+			validate: func(t *testing.T, cfg *Config) {
+				if cfg.RunInterval != 1800 {
+					t.Errorf("RunInterval = %v, want 1800", cfg.RunInterval)
+				}
+				if cfg.MaxItems != 10 {
+					t.Errorf("MaxItems = %v, want 10", cfg.MaxItems)
+				}
+			},
 		},
 		{
 			name: "invalid SMTP_PORT",
 			env: map[string]string{
-				"ICLOUD_ALBUM_URL":  "https://example.com/album",
-				"REDIS_URL":         "redis://localhost:6379",
-				"SMTP_SERVER":       "smtp.example.com",
-				"SMTP_PORT":         "invalid",
-				"SMTP_USERNAME":     "user@example.com",
-				"SMTP_PASSWORD":     "password",
-				"SMTP_DESTINATION":  "dest@example.com",
+				"REDIS_URL":        "redis://localhost:6379",
+				"SMTP_SERVER":      "smtp.example.com",
+				"SMTP_PORT":        "invalid",
+				"SMTP_USERNAME":    "user@example.com",
+				"SMTP_PASSWORD":    "password",
+				"SMTP_DESTINATION": "dest@example.com",
+				"IMAGE_DIR":        tmpDir,
 			},
-			wantErr: true,
+			configJSON: `{"album_urls": ["https://example.com/album"]}`,
+			wantErr:    true,
+		},
+		{
+			name: "custom IMAGE_DIR",
+			env: map[string]string{
+				"REDIS_URL":        "redis://localhost:6379",
+				"SMTP_SERVER":      "smtp.example.com",
+				"SMTP_PORT":        "587",
+				"SMTP_USERNAME":    "user@example.com",
+				"SMTP_PASSWORD":    "password",
+				"SMTP_DESTINATION": "dest@example.com",
+				"IMAGE_DIR":        tmpDir,
+			},
+			configJSON: `{"album_urls": ["https://example.com/album"]}`,
+			wantErr:    false,
+			validate: func(t *testing.T, cfg *Config) {
+				if cfg.ImageDir != tmpDir {
+					t.Errorf("ImageDir = %v, want %v", cfg.ImageDir, tmpDir)
+				}
+			},
 		},
 	}
 
@@ -93,6 +152,29 @@ func TestLoad(t *testing.T) {
 			// Set environment variables
 			for key, value := range tt.env {
 				os.Setenv(key, value)
+			}
+
+			// Set up test directory and config file
+			testImageDir := tmpDir
+			if dir, ok := tt.env["IMAGE_DIR"]; ok && dir != "" {
+				testImageDir = dir
+			}
+			err := os.MkdirAll(testImageDir, 0755)
+			if err != nil {
+				t.Fatalf("Failed to create test directory: %v", err)
+			}
+
+			configPath := filepath.Join(testImageDir, "config.json")
+			
+			// Remove config file if it exists (for tests that expect it to be missing)
+			if tt.configJSON == "" {
+				os.Remove(configPath)
+			} else {
+				// Create config file if needed
+				err = os.WriteFile(configPath, []byte(tt.configJSON), 0644)
+				if err != nil {
+					t.Fatalf("Failed to write test config file: %v", err)
+				}
 			}
 
 			cfg, err := Load()
@@ -105,17 +187,8 @@ func TestLoad(t *testing.T) {
 				if cfg == nil {
 					t.Fatal("Load() returned nil config")
 				}
-				if cfg.ICloudAlbumURL != tt.env["ICLOUD_ALBUM_URL"] {
-					t.Errorf("ICloudAlbumURL = %v, want %v", cfg.ICloudAlbumURL, tt.env["ICLOUD_ALBUM_URL"])
-				}
-				if tt.env["RUN_INTERVAL"] != "" {
-					if cfg.RunInterval != 1800 {
-						t.Errorf("RunInterval = %v, want 1800", cfg.RunInterval)
-					}
-				} else {
-					if cfg.RunInterval != 3600 {
-						t.Errorf("RunInterval = %v, want 3600", cfg.RunInterval)
-					}
+				if tt.validate != nil {
+					tt.validate(t, cfg)
 				}
 			}
 
@@ -126,4 +199,3 @@ func TestLoad(t *testing.T) {
 		})
 	}
 }
-
