@@ -1,8 +1,10 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 )
 
@@ -15,9 +17,14 @@ type SMTPConfig struct {
 	From     string // Optional "From" email address (defaults to Username if not set)
 }
 
+// AlbumConfig represents the configuration file structure
+type AlbumConfig struct {
+	AlbumURLs []string `json:"album_urls"`
+}
+
 // Config holds all application configuration
 type Config struct {
-	ICloudAlbumURL string
+	AlbumURLs      []string
 	RedisURL       string
 	SMTPConfig     *SMTPConfig
 	SMTPDestination string
@@ -26,15 +33,27 @@ type Config struct {
 	ImageDir       string
 }
 
-// Load loads configuration from environment variables
+// Load loads configuration from environment variables and config file
 func Load() (*Config, error) {
 	cfg := &Config{}
 
-	// Required variables
-	cfg.ICloudAlbumURL = os.Getenv("ICLOUD_ALBUM_URL")
-	if cfg.ICloudAlbumURL == "" {
-		return nil, fmt.Errorf("ICLOUD_ALBUM_URL is required")
+	// Get image directory (default: /images)
+	imageDir := os.Getenv("IMAGE_DIR")
+	if imageDir == "" {
+		imageDir = "/images" // Default: /images
 	}
+	cfg.ImageDir = imageDir
+
+	// Load album URLs from config file
+	configPath := filepath.Join(imageDir, "config.json")
+	albumConfig, err := loadAlbumConfig(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load album config from %s: %w", configPath, err)
+	}
+	if len(albumConfig.AlbumURLs) == 0 {
+		return nil, fmt.Errorf("no album URLs found in config file at %s", configPath)
+	}
+	cfg.AlbumURLs = albumConfig.AlbumURLs
 
 	cfg.RedisURL = os.Getenv("REDIS_URL")
 	if cfg.RedisURL == "" {
@@ -107,13 +126,21 @@ func Load() (*Config, error) {
 		cfg.MaxItems = maxItems
 	}
 
-	imageDir := os.Getenv("IMAGE_DIR")
-	if imageDir == "" {
-		cfg.ImageDir = "/images" // Default: /images
-	} else {
-		cfg.ImageDir = imageDir
+	return cfg, nil
+}
+
+// loadAlbumConfig loads the album configuration from a JSON file
+func loadAlbumConfig(configPath string) (*AlbumConfig, error) {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
-	return cfg, nil
+	var albumConfig AlbumConfig
+	if err := json.Unmarshal(data, &albumConfig); err != nil {
+		return nil, fmt.Errorf("failed to parse config file: %w", err)
+	}
+
+	return &albumConfig, nil
 }
 
