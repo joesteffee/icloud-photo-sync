@@ -18,11 +18,30 @@ A Go-based Docker service that periodically scrapes iCloud shared albums, downlo
 - Redis server
 - SMTP server access
 
-## Environment Variables
+## Configuration
+
+### Album Configuration File
+
+The service reads album URLs from a JSON configuration file located at `/images/config.json` (or `${IMAGE_DIR}/config.json` if `IMAGE_DIR` is set). This file should contain a list of iCloud shared album URLs to sync from.
+
+**Example configuration file (`/images/config.json`):**
+
+```json
+{
+  "album_urls": [
+    "https://www.icloud.com/sharedalbum/#EXAMPLE_TOKEN",
+    "https://www.icloud.com/sharedalbum/#A1Y48TkBrRUFpV",
+    "https://www.icloud.com/sharedalbum/#C3A60VmDsTUGrX"
+  ]
+}
+```
+
+You can specify multiple album URLs in the `album_urls` array. The service will sync images from all specified albums.
+
+### Environment Variables
 
 | Variable | Description | Required | Default |
 |----------|-------------|----------|---------|
-| `ICLOUD_ALBUM_URL` | iCloud shared album public URL | Yes | - |
 | `REDIS_URL` | Redis connection URL (e.g., `redis://localhost:6379`) | Yes | - |
 | `SMTP_SERVER` | SMTP server hostname | Yes | - |
 | `SMTP_PORT` | SMTP server port | Yes | - |
@@ -32,21 +51,33 @@ A Go-based Docker service that periodically scrapes iCloud shared albums, downlo
 | `SMTP_DESTINATION` | Email address to send photos to | Yes | - |
 | `RUN_INTERVAL` | Seconds between runs | No | 3600 |
 | `MAX_ITEMS` | Maximum number of photos to email per run | No | 5 |
-| `IMAGE_DIR` | Directory to store downloaded images | No | `/images` |
+| `IMAGE_DIR` | Directory to store downloaded images and config file | No | `/images` |
 
 ## Usage
 
 ### Docker
 
-1. Build the Docker image:
+1. Create the configuration file:
+   ```bash
+   mkdir -p /path/to/images
+   cat > /path/to/images/config.json << EOF
+   {
+     "album_urls": [
+       "https://www.icloud.com/sharedalbum/#EXAMPLE_TOKEN",
+       "https://www.icloud.com/sharedalbum/#A1Y48TkBrRUFpV"
+     ]
+   }
+   EOF
+   ```
+
+2. Build the Docker image:
    ```bash
    docker build -t icloud-photo-sync:latest .
    ```
 
-2. Run the container:
+3. Run the container:
    ```bash
    docker run -d \
-     -e ICLOUD_ALBUM_URL="https://www.icloud.com/sharedalbum/#EXAMPLE_TOKEN" \
      -e REDIS_URL="redis://redis:6379" \
      -e SMTP_SERVER="smtp.gmail.com" \
      -e SMTP_PORT="587" \
@@ -69,9 +100,21 @@ A Go-based Docker service that periodically scrapes iCloud shared albums, downlo
    go mod download
    ```
 
-2. Set environment variables and run:
+2. Create the configuration file:
    ```bash
-   export ICLOUD_ALBUM_URL="https://www.icloud.com/sharedalbum/#EXAMPLE_TOKEN"
+   mkdir -p ./images
+   cat > ./images/config.json << EOF
+   {
+     "album_urls": [
+       "https://www.icloud.com/sharedalbum/#EXAMPLE_TOKEN",
+       "https://www.icloud.com/sharedalbum/#A1Y48TkBrRUFpV"
+     ]
+   }
+   EOF
+   ```
+
+3. Set environment variables and run:
+   ```bash
    export REDIS_URL="redis://localhost:6379"
    export SMTP_SERVER="smtp.gmail.com"
    export SMTP_PORT="587"
