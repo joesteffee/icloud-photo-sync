@@ -33,3 +33,7 @@ Thumbs.db
 /images/*
 !/images/.gitkeep
 
+# Sensitive files
+refresh_token.txt
+*.token
+

@@ -9,6 +9,7 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"os"
 	"sync"
 
@@ -303,16 +304,45 @@ func (c *Client) uploadMedia(imagePath string) (string, error) {
 	}
 	defer file.Close()
 
-	// Create multipart form
+	// Get file info for filename
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return "", fmt.Errorf("failed to get file info: %w", err)
+	}
+	fileName := fileInfo.Name()
+
+	// Create multipart form with metadata and file parts
+	// Google Photos API requires 2 parts: metadata (JSON) and file data
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 
-	part, err := writer.CreateFormFile("file", file.Name())
+	// Part 1: Metadata (required, must be JSON with Content-Type header)
+	metadataHeader := make(textproto.MIMEHeader)
+	metadataHeader.Set("Content-Type", "application/json")
+	metadataPart, err := writer.CreatePart(metadataHeader)
 	if err != nil {
-		return "", fmt.Errorf("failed to create form file: %w", err)
+		return "", fmt.Errorf("failed to create metadata part: %w", err)
+	}
+	_, err = metadataPart.Write([]byte("{}"))
+	if err != nil {
+		return "", fmt.Errorf("failed to write metadata: %w", err)
 	}
 
-	_, err = io.Copy(part, file)
+	// Part 2: File data (binary with Content-Type header)
+	// Reset file position to beginning
+	_, err = file.Seek(0, 0)
+	if err != nil {
+		return "", fmt.Errorf("failed to seek file: %w", err)
+	}
+
+	fileHeader := make(textproto.MIMEHeader)
+	fileHeader.Set("Content-Type", "application/octet-stream")
+	filePart, err := writer.CreatePart(fileHeader)
+	if err != nil {
+		return "", fmt.Errorf("failed to create file part: %w", err)
+	}
+
+	_, err = io.Copy(filePart, file)
 	if err != nil {
 		return "", fmt.Errorf("failed to copy file: %w", err)
 	}
@@ -330,7 +360,7 @@ func (c *Client) uploadMedia(imagePath string) (string, error) {
 
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("X-Goog-Upload-Protocol", "multipart")
-	req.Header.Set("X-Goog-Upload-File-Name", file.Name())
+	req.Header.Set("X-Goog-Upload-File-Name", fileName)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
