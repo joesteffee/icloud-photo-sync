@@ -110,11 +110,12 @@ func runSync(
 	log.Printf("Found %d total image URLs across all albums", len(allImageURLs))
 
 	// Get Google Photos album ID if configured (cache it for the run)
+	// With new API scopes, the album will be created if it doesn't exist
 	var googlePhotosAlbumID string
 	if photosClient != nil {
-		albumID, err := photosClient.GetOrFindAlbumID()
+		albumID, err := photosClient.GetOrCreateAlbumID()
 		if err != nil {
-			log.Printf("Error finding Google Photos album: %v. Google Photos sync will be skipped for this run.", err)
+			log.Printf("Error getting/creating Google Photos album: %v. Google Photos sync will be skipped for this run.", err)
 			photosClient = nil // Disable Google Photos for this run
 		} else {
 			googlePhotosAlbumID = albumID

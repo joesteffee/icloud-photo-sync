@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -38,8 +39,9 @@ func NewClient(cfg *config.GooglePhotosConfig) (*Client, error) {
 			TokenURL: "https://oauth2.googleapis.com/token",
 		},
 		Scopes: []string{
-			"https://www.googleapis.com/auth/photoslibrary",
 			"https://www.googleapis.com/auth/photoslibrary.appendonly",
+			"https://www.googleapis.com/auth/photoslibrary.readonly.appcreateddata",
+			"https://www.googleapis.com/auth/photoslibrary.edit.appcreateddata",
 		},
 	}
 
@@ -87,7 +89,55 @@ type albumResponse struct {
 	Title string `json:"title"`
 }
 
-// FindAlbumByName finds a Google Photos album by name and caches the album ID
+// CreateAlbum creates a new Google Photos album
+func (c *Client) CreateAlbum(albumName string) (string, error) {
+	requestBody := map[string]interface{}{
+		"album": map[string]string{
+			"title": albumName,
+		},
+	}
+
+	jsonData, err := json.Marshal(requestBody)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(c.ctx, "POST", "https://photoslibrary.googleapis.com/v1/albums", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to create album: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("failed to create album: status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var albumResponse struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&albumResponse); err != nil {
+		return "", fmt.Errorf("failed to decode album response: %w", err)
+	}
+
+	// Cache the album ID
+	c.albumMutex.Lock()
+	c.albumID = albumResponse.ID
+	c.albumMutex.Unlock()
+
+	return albumResponse.ID, nil
+}
+
+// FindAlbumByName finds a Google Photos album by name (only app-created albums)
+// With the new API scopes, we can only access albums created by this app
 func (c *Client) FindAlbumByName(albumName string) (string, error) {
 	// Check cached album ID first
 	c.albumMutex.RLock()
@@ -99,11 +149,15 @@ func (c *Client) FindAlbumByName(albumName string) (string, error) {
 	c.albumMutex.RUnlock()
 
 	// The HTTP client will automatically refresh the token if needed
+	// With new scopes, we can only list app-created albums
 	var nextPageToken string
 	for {
 		url := "https://photoslibrary.googleapis.com/v1/albums"
+		// Filter to only show app-created albums
 		if nextPageToken != "" {
-			url += "?pageToken=" + nextPageToken
+			url += "?pageToken=" + nextPageToken + "&excludeNonAppCreatedData=true"
+		} else {
+			url += "?excludeNonAppCreatedData=true"
 		}
 
 		req, err := http.NewRequestWithContext(c.ctx, "GET", url, nil)
@@ -147,7 +201,28 @@ func (c *Client) FindAlbumByName(albumName string) (string, error) {
 		nextPageToken = albumsList.NextPageToken
 	}
 
-	return "", fmt.Errorf("album not found: %s", albumName)
+	return "", fmt.Errorf("album not found: %s (note: with new API scopes, only app-created albums are accessible)", albumName)
+}
+
+// GetOrCreateAlbumID gets the album ID, creating it if it doesn't exist
+func (c *Client) GetOrCreateAlbumID() (string, error) {
+	c.albumMutex.RLock()
+	if c.albumID != "" {
+		cachedID := c.albumID
+		c.albumMutex.RUnlock()
+		return cachedID, nil
+	}
+	c.albumMutex.RUnlock()
+
+	// Try to find the album first
+	albumID, err := c.FindAlbumByName(c.config.AlbumName)
+	if err == nil {
+		return albumID, nil
+	}
+
+	// If not found, create it
+	log.Printf("Album '%s' not found, creating new album...", c.config.AlbumName)
+	return c.CreateAlbum(c.config.AlbumName)
 }
 
 // BatchCreateMediaItemsRequest represents the request to create media items
@@ -366,14 +441,7 @@ func (c *Client) addMediaItemToAlbum(albumID string, mediaItemID string) error {
 }
 
 // GetOrFindAlbumID gets the cached album ID or finds it by name
+// Deprecated: Use GetOrCreateAlbumID instead for better compatibility with new API scopes
 func (c *Client) GetOrFindAlbumID() (string, error) {
-	c.albumMutex.RLock()
-	if c.albumID != "" {
-		cachedID := c.albumID
-		c.albumMutex.RUnlock()
-		return cachedID, nil
-	}
-	c.albumMutex.RUnlock()
-
-	return c.FindAlbumByName(c.config.AlbumName)
+	return c.GetOrCreateAlbumID()
 }
