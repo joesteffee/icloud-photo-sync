@@ -213,31 +213,19 @@ To enable Google Photos sync, you need to set up OAuth2 credentials and create a
    - Click "Save and Continue" then "Back to Dashboard"
 4. For application type, choose "Desktop app" or "Other"
 5. Name the OAuth client (e.g., "iCloud Photo Sync")
-6. Click "Create"
-7. **Save the Client ID and Client Secret** - you'll need these for `GOOGLE_PHOTOS_CLIENT_ID` and `GOOGLE_PHOTOS_CLIENT_SECRET`
+6. **Important:** When creating a Desktop app OAuth client, the redirect URI will be automatically set to `urn:ietf:wg:oauth:2.0:oob` (which is what the script uses). If you choose "Other", you may need to add this redirect URI manually.
+7. Click "Create"
+8. **Save the Client ID and Client Secret** - you'll need these for `GOOGLE_PHOTOS_CLIENT_ID` and `GOOGLE_PHOTOS_CLIENT_SECRET`
 
 ### Step 3: Obtain Refresh Token
 
-You have two options to get the refresh token:
+**Important:** The refresh token is required because access tokens expire after a short time (typically 1 hour). The refresh token allows the service to automatically get new access tokens without requiring user interaction, which is essential for a long-running service.
 
-#### Option A: Using OAuth 2.0 Playground (Recommended)
+**Note:** The OAuth 2.0 Playground does not include the Photos Library API in its list of available APIs, so you'll need to use one of the methods below.
 
-1. Go to [OAuth 2.0 Playground](https://developers.google.com/oauthplayground/)
-2. Click the gear icon (⚙️) in the top right corner
-3. Check "Use your own OAuth credentials"
-4. Enter your **Client ID** and **Client Secret** from Step 2
-5. In the left panel, scroll down and find "Photos Library API v1"
-6. Select the following scopes:
-   - `https://www.googleapis.com/auth/photoslibrary`
-   - `https://www.googleapis.com/auth/photoslibrary.appendonly`
-7. Click "Authorize APIs"
-8. Sign in with your Google account and grant permissions
-9. Click "Exchange authorization code for tokens"
-10. Copy the **Refresh token** value - this is your `GOOGLE_PHOTOS_REFRESH_TOKEN`
+#### Option A: Using a Python Script (Recommended)
 
-#### Option B: Using a Script
-
-You can use this Python script to obtain the refresh token:
+Save this Python script and run it to obtain your refresh token:
 
 ```python
 #!/usr/bin/env python3
@@ -245,24 +233,42 @@ import urllib.parse
 import urllib.request
 import json
 
+# Replace these with your values from Step 2
 CLIENT_ID = "your-client-id"
 CLIENT_SECRET = "your-client-secret"
 REDIRECT_URI = "urn:ietf:wg:oauth:2.0:oob"  # For desktop apps
 
-# Step 1: Get authorization URL
+# Step 1: Construct authorization URL
+scopes = [
+    "https://www.googleapis.com/auth/photoslibrary",
+    "https://www.googleapis.com/auth/photoslibrary.appendonly"
+]
+scope_string = "+".join(scopes)
+
 auth_url = (
     "https://accounts.google.com/o/oauth2/v2/auth?"
     "client_id={}&"
     "redirect_uri={}&"
     "response_type=code&"
-    "scope=https://www.googleapis.com/auth/photoslibrary+https://www.googleapis.com/auth/photoslibrary.appendonly&"
-    "access_type=offline"
-).format(CLIENT_ID, urllib.parse.quote(REDIRECT_URI))
+    "scope={}&"
+    "access_type=offline&"
+    "prompt=consent"
+).format(
+    CLIENT_ID,
+    urllib.parse.quote(REDIRECT_URI),
+    urllib.parse.quote(scope_string)
+)
 
-print("1. Open this URL in your browser:")
+print("=" * 60)
+print("Step 1: Open this URL in your browser:")
+print("=" * 60)
 print(auth_url)
-print("\n2. Authorize the application and copy the authorization code")
-auth_code = input("3. Enter the authorization code: ")
+print("\nStep 2: Sign in with your Google account and authorize the application")
+print("Step 3: After authorization, you'll be redirected to a page showing an authorization code")
+print("Step 4: Copy the authorization code from that page")
+print("=" * 60)
+
+auth_code = input("\nEnter the authorization code: ")
 
 # Step 2: Exchange authorization code for tokens
 token_url = "https://oauth2.googleapis.com/token"
@@ -274,13 +280,49 @@ data = urllib.parse.urlencode({
     "grant_type": "authorization_code"
 }).encode()
 
-req = urllib.request.Request(token_url, data=data)
+req = urllib.request.Request(token_url, data=data, headers={"Content-Type": "application/x-www-form-urlencoded"})
 response = urllib.request.urlopen(req)
 tokens = json.loads(response.read().decode())
 
-print("\nRefresh Token:")
+print("\n" + "=" * 60)
+print("SUCCESS! Your refresh token:")
+print("=" * 60)
 print(tokens["refresh_token"])
+print("\nSave this as your GOOGLE_PHOTOS_REFRESH_TOKEN")
+print("=" * 60)
 ```
+
+**Important:** Before running the script:
+1. Make sure your OAuth client in Google Cloud Console has the redirect URI `urn:ietf:wg:oauth:2.0:oob` configured (or update the script to use a different redirect URI that matches your OAuth client settings)
+2. Replace `your-client-id` and `your-client-secret` with your actual values from Step 2
+3. The `prompt=consent` parameter ensures you get a refresh token even if you've authorized the app before
+
+#### Option B: Manual OAuth Flow
+
+If you prefer not to use Python, you can do this manually:
+
+1. **Construct the authorization URL:**
+   ```
+   https://accounts.google.com/o/oauth2/v2/auth?client_id=YOUR_CLIENT_ID&redirect_uri=urn:ietf:wg:oauth:2.0:oob&response_type=code&scope=https://www.googleapis.com/auth/photoslibrary+https://www.googleapis.com/auth/photoslibrary.appendonly&access_type=offline&prompt=consent
+   ```
+   Replace `YOUR_CLIENT_ID` with your actual client ID.
+
+2. **Open the URL in your browser**, sign in, and authorize the application.
+
+3. **Copy the authorization code** from the redirect page.
+
+4. **Exchange the code for tokens** using curl:
+   ```bash
+   curl -X POST https://oauth2.googleapis.com/token \
+     -d "code=AUTHORIZATION_CODE" \
+     -d "client_id=YOUR_CLIENT_ID" \
+     -d "client_secret=YOUR_CLIENT_SECRET" \
+     -d "redirect_uri=urn:ietf:wg:oauth:2.0:oob" \
+     -d "grant_type=authorization_code"
+   ```
+   Replace `AUTHORIZATION_CODE`, `YOUR_CLIENT_ID`, and `YOUR_CLIENT_SECRET` with your actual values.
+
+5. **Extract the refresh_token** from the JSON response.
 
 Save this script, replace `CLIENT_ID` and `CLIENT_SECRET` with your values, run it, and follow the prompts.
 
