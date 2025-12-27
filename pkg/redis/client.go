@@ -36,29 +36,19 @@ func NewClient(redisURL string) (*Client, error) {
 	}, nil
 }
 
-// HashExists checks if a hash exists in Redis
+// HashExists checks if a hash exists in Redis (for email - kept for backward compatibility)
 func (c *Client) HashExists(hash string) (bool, error) {
-	key := c.hashKey(hash)
-	exists, err := c.client.Exists(c.ctx, key).Result()
-	if err != nil {
-		return false, fmt.Errorf("failed to check hash existence: %w", err)
-	}
-	return exists > 0, nil
+	return c.HashExistsForEmail(hash)
 }
 
-// SetHash stores a hash in Redis with the associated image URL
+// SetHash stores a hash in Redis with the associated image URL (for email - kept for backward compatibility)
 func (c *Client) SetHash(hash string, imageURL string) error {
-	key := c.hashKey(hash)
-	err := c.client.Set(c.ctx, key, imageURL, 0).Err()
-	if err != nil {
-		return fmt.Errorf("failed to set hash: %w", err)
-	}
-	return nil
+	return c.SetHashForEmail(hash, imageURL)
 }
 
 // GetHash retrieves the image URL associated with a hash
 func (c *Client) GetHash(hash string) (string, error) {
-	key := c.hashKey(hash)
+	key := c.hashKey("email", hash)
 	val, err := c.client.Get(c.ctx, key).Result()
 	if err == redis.Nil {
 		return "", nil
@@ -69,6 +59,46 @@ func (c *Client) GetHash(hash string) (string, error) {
 	return val, nil
 }
 
+// HashExistsForEmail checks if a hash exists in Redis for email tracking
+func (c *Client) HashExistsForEmail(hash string) (bool, error) {
+	key := c.hashKey("email", hash)
+	exists, err := c.client.Exists(c.ctx, key).Result()
+	if err != nil {
+		return false, fmt.Errorf("failed to check hash existence: %w", err)
+	}
+	return exists > 0, nil
+}
+
+// SetHashForEmail stores a hash in Redis with the associated image URL for email tracking
+func (c *Client) SetHashForEmail(hash string, imageURL string) error {
+	key := c.hashKey("email", hash)
+	err := c.client.Set(c.ctx, key, imageURL, 0).Err()
+	if err != nil {
+		return fmt.Errorf("failed to set hash: %w", err)
+	}
+	return nil
+}
+
+// HashExistsForGooglePhotos checks if a hash exists in Redis for Google Photos tracking
+func (c *Client) HashExistsForGooglePhotos(hash string) (bool, error) {
+	key := c.hashKey("google_photos", hash)
+	exists, err := c.client.Exists(c.ctx, key).Result()
+	if err != nil {
+		return false, fmt.Errorf("failed to check hash existence: %w", err)
+	}
+	return exists > 0, nil
+}
+
+// SetHashForGooglePhotos stores a hash in Redis with the associated image URL for Google Photos tracking
+func (c *Client) SetHashForGooglePhotos(hash string, imageURL string) error {
+	key := c.hashKey("google_photos", hash)
+	err := c.client.Set(c.ctx, key, imageURL, 0).Err()
+	if err != nil {
+		return fmt.Errorf("failed to set hash: %w", err)
+	}
+	return nil
+}
+
 // Close closes the Redis connection
 func (c *Client) Close() error {
 	if c.client != nil {
@@ -77,8 +107,8 @@ func (c *Client) Close() error {
 	return nil
 }
 
-// hashKey returns the Redis key for a hash
-func (c *Client) hashKey(hash string) string {
-	return fmt.Sprintf("image:hash:%s", hash)
+// hashKey returns the Redis key for a hash with a prefix
+func (c *Client) hashKey(prefix, hash string) string {
+	return fmt.Sprintf("image:hash:%s:%s", prefix, hash)
 }
 

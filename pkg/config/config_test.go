@@ -13,6 +13,8 @@ func TestLoad(t *testing.T) {
 		"REDIS_URL", "SMTP_SERVER", "SMTP_PORT",
 		"SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_DESTINATION",
 		"RUN_INTERVAL", "MAX_ITEMS", "IMAGE_DIR",
+		"GOOGLE_PHOTOS_CLIENT_ID", "GOOGLE_PHOTOS_CLIENT_SECRET",
+		"GOOGLE_PHOTOS_REFRESH_TOKEN", "GOOGLE_PHOTOS_ALBUM_NAME",
 	}
 	for _, key := range envVars {
 		originalEnv[key] = os.Getenv(key)
@@ -142,6 +144,72 @@ func TestLoad(t *testing.T) {
 			validate: func(t *testing.T, cfg *Config) {
 				if cfg.ImageDir != tmpDir {
 					t.Errorf("ImageDir = %v, want %v", cfg.ImageDir, tmpDir)
+				}
+			},
+		},
+		{
+			name: "with Google Photos config",
+			env: map[string]string{
+				"REDIS_URL":                  "redis://localhost:6379",
+				"SMTP_SERVER":                 "smtp.example.com",
+				"SMTP_PORT":                   "587",
+				"SMTP_USERNAME":               "user@example.com",
+				"SMTP_PASSWORD":               "password",
+				"SMTP_DESTINATION":            "dest@example.com",
+				"IMAGE_DIR":                   tmpDir,
+				"GOOGLE_PHOTOS_CLIENT_ID":     "gphotos-client-id",
+				"GOOGLE_PHOTOS_CLIENT_SECRET": "gphotos-secret",
+				"GOOGLE_PHOTOS_REFRESH_TOKEN": "gphotos-refresh-token",
+				"GOOGLE_PHOTOS_ALBUM_NAME":    "My Album",
+			},
+			configJSON: `{"album_urls": ["https://example.com/album"]}`,
+			wantErr:    false,
+			validate: func(t *testing.T, cfg *Config) {
+				if cfg.GooglePhotosConfig == nil {
+					t.Error("GooglePhotosConfig should not be nil")
+					return
+				}
+				if cfg.GooglePhotosConfig.ClientID != "gphotos-client-id" {
+					t.Errorf("GooglePhotosConfig.ClientID = %v, want gphotos-client-id", cfg.GooglePhotosConfig.ClientID)
+				}
+				if cfg.GooglePhotosConfig.AlbumName != "My Album" {
+					t.Errorf("GooglePhotosConfig.AlbumName = %v, want My Album", cfg.GooglePhotosConfig.AlbumName)
+				}
+			},
+		},
+		{
+			name: "partial Google Photos config should fail",
+			env: map[string]string{
+				"REDIS_URL":                  "redis://localhost:6379",
+				"SMTP_SERVER":                 "smtp.example.com",
+				"SMTP_PORT":                   "587",
+				"SMTP_USERNAME":               "user@example.com",
+				"SMTP_PASSWORD":               "password",
+				"SMTP_DESTINATION":            "dest@example.com",
+				"IMAGE_DIR":                   tmpDir,
+				"GOOGLE_PHOTOS_CLIENT_ID":     "gphotos-client-id",
+				// Missing other Google Photos env vars
+			},
+			configJSON: `{"album_urls": ["https://example.com/album"]}`,
+			wantErr:    true,
+		},
+		{
+			name: "without Google Photos config",
+			env: map[string]string{
+				"REDIS_URL":        "redis://localhost:6379",
+				"SMTP_SERVER":       "smtp.example.com",
+				"SMTP_PORT":        "587",
+				"SMTP_USERNAME":     "user@example.com",
+				"SMTP_PASSWORD":     "password",
+				"SMTP_DESTINATION": "dest@example.com",
+				"IMAGE_DIR":        tmpDir,
+				// No Google Photos env vars
+			},
+			configJSON: `{"album_urls": ["https://example.com/album"]}`,
+			wantErr:    false,
+			validate: func(t *testing.T, cfg *Config) {
+				if cfg.GooglePhotosConfig != nil {
+					t.Error("GooglePhotosConfig should be nil when not configured")
 				}
 			},
 		},

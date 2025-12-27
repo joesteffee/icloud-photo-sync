@@ -139,3 +139,89 @@ func TestClient_WithMock(t *testing.T) {
 	t.Skip("Mock Redis tests not implemented")
 }
 
+func TestClient_SeparateEmailAndGooglePhotosTracking(t *testing.T) {
+	client := setupTestRedis(t)
+	defer client.Close()
+
+	hash := "test-hash-separate"
+	imageURL := "https://example.com/image.jpg"
+
+	// Set hash for email only
+	err := client.SetHashForEmail(hash, imageURL)
+	if err != nil {
+		t.Fatalf("SetHashForEmail() error = %v", err)
+	}
+
+	// Verify email tracking
+	emailExists, err := client.HashExistsForEmail(hash)
+	if err != nil {
+		t.Fatalf("HashExistsForEmail() error = %v", err)
+	}
+	if !emailExists {
+		t.Error("HashExistsForEmail() = false, want true")
+	}
+
+	// Verify Google Photos tracking is independent (should not exist)
+	gphotosExists, err := client.HashExistsForGooglePhotos(hash)
+	if err != nil {
+		t.Fatalf("HashExistsForGooglePhotos() error = %v", err)
+	}
+	if gphotosExists {
+		t.Error("HashExistsForGooglePhotos() = true, want false (email and Google Photos should be independent)")
+	}
+
+	// Now set hash for Google Photos
+	err = client.SetHashForGooglePhotos(hash, imageURL)
+	if err != nil {
+		t.Fatalf("SetHashForGooglePhotos() error = %v", err)
+	}
+
+	// Verify both now exist independently
+	emailExists, err = client.HashExistsForEmail(hash)
+	if err != nil {
+		t.Fatalf("HashExistsForEmail() error = %v", err)
+	}
+	if !emailExists {
+		t.Error("HashExistsForEmail() = false, want true")
+	}
+
+	gphotosExists, err = client.HashExistsForGooglePhotos(hash)
+	if err != nil {
+		t.Fatalf("HashExistsForGooglePhotos() error = %v", err)
+	}
+	if !gphotosExists {
+		t.Error("HashExistsForGooglePhotos() = false, want true")
+	}
+}
+
+func TestClient_BackwardCompatibility(t *testing.T) {
+	client := setupTestRedis(t)
+	defer client.Close()
+
+	hash := "test-hash-backward"
+	imageURL := "https://example.com/image.jpg"
+
+	// Test that old HashExists and SetHash still work (should use email tracking)
+	err := client.SetHash(hash, imageURL)
+	if err != nil {
+		t.Fatalf("SetHash() error = %v", err)
+	}
+
+	exists, err := client.HashExists(hash)
+	if err != nil {
+		t.Fatalf("HashExists() error = %v", err)
+	}
+	if !exists {
+		t.Error("HashExists() = false, want true (backward compatibility)")
+	}
+
+	// Verify it's actually using email tracking
+	emailExists, err := client.HashExistsForEmail(hash)
+	if err != nil {
+		t.Fatalf("HashExistsForEmail() error = %v", err)
+	}
+	if !emailExists {
+		t.Error("SetHash() should set email tracking for backward compatibility")
+	}
+}
+
