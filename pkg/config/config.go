@@ -17,6 +17,14 @@ type SMTPConfig struct {
 	From     string // Optional "From" email address (defaults to Username if not set)
 }
 
+// GooglePhotosConfig holds Google Photos API configuration
+type GooglePhotosConfig struct {
+	ClientID     string
+	ClientSecret string
+	RefreshToken string
+	AlbumName    string
+}
+
 // AlbumConfig represents the configuration file structure
 type AlbumConfig struct {
 	AlbumURLs []string `json:"album_urls"`
@@ -24,13 +32,14 @@ type AlbumConfig struct {
 
 // Config holds all application configuration
 type Config struct {
-	AlbumURLs      []string
-	RedisURL       string
-	SMTPConfig     *SMTPConfig
-	SMTPDestination string
-	RunInterval    int
-	MaxItems       int
-	ImageDir       string
+	AlbumURLs         []string
+	RedisURL          string
+	SMTPConfig        *SMTPConfig
+	SMTPDestination   string
+	GooglePhotosConfig *GooglePhotosConfig // Optional - nil if not configured
+	RunInterval       int
+	MaxItems          int
+	ImageDir          string
 }
 
 // Load loads configuration from environment variables and config file
@@ -124,6 +133,35 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("MAX_ITEMS must be a valid integer: %v", err)
 		}
 		cfg.MaxItems = maxItems
+	}
+
+	// Google Photos configuration (optional - only enabled if all vars are provided)
+	googlePhotosClientID := os.Getenv("GOOGLE_PHOTOS_CLIENT_ID")
+	googlePhotosClientSecret := os.Getenv("GOOGLE_PHOTOS_CLIENT_SECRET")
+	googlePhotosRefreshToken := os.Getenv("GOOGLE_PHOTOS_REFRESH_TOKEN")
+	googlePhotosAlbumName := os.Getenv("GOOGLE_PHOTOS_ALBUM_NAME")
+
+	// If any Google Photos env var is set, all must be set
+	if googlePhotosClientID != "" || googlePhotosClientSecret != "" || googlePhotosRefreshToken != "" || googlePhotosAlbumName != "" {
+		if googlePhotosClientID == "" {
+			return nil, fmt.Errorf("GOOGLE_PHOTOS_CLIENT_ID is required when Google Photos is enabled")
+		}
+		if googlePhotosClientSecret == "" {
+			return nil, fmt.Errorf("GOOGLE_PHOTOS_CLIENT_SECRET is required when Google Photos is enabled")
+		}
+		if googlePhotosRefreshToken == "" {
+			return nil, fmt.Errorf("GOOGLE_PHOTOS_REFRESH_TOKEN is required when Google Photos is enabled")
+		}
+		if googlePhotosAlbumName == "" {
+			return nil, fmt.Errorf("GOOGLE_PHOTOS_ALBUM_NAME is required when Google Photos is enabled")
+		}
+
+		cfg.GooglePhotosConfig = &GooglePhotosConfig{
+			ClientID:     googlePhotosClientID,
+			ClientSecret: googlePhotosClientSecret,
+			RefreshToken: googlePhotosRefreshToken,
+			AlbumName:    googlePhotosAlbumName,
+		}
 	}
 
 	return cfg, nil

@@ -9,6 +9,7 @@ import (
 
 	"github.com/jsteffee/icloud-photo-sync/pkg/config"
 	"github.com/jsteffee/icloud-photo-sync/pkg/email"
+	"github.com/jsteffee/icloud-photo-sync/pkg/photos"
 	"github.com/jsteffee/icloud-photo-sync/pkg/redis"
 	"github.com/jsteffee/icloud-photo-sync/pkg/scraper"
 	"github.com/jsteffee/icloud-photo-sync/pkg/storage"
@@ -36,6 +37,18 @@ func main() {
 		log.Fatalf("Failed to initialize email sender: %v", err)
 	}
 
+	// Initialize Google Photos client if configured
+	var photosClient *photos.Client
+	if cfg.GooglePhotosConfig != nil {
+		photosClient, err = photos.NewClient(cfg.GooglePhotosConfig)
+		if err != nil {
+			log.Fatalf("Failed to initialize Google Photos client: %v", err)
+		}
+		log.Printf("Google Photos integration enabled for album: %s", cfg.GooglePhotosConfig.AlbumName)
+	} else {
+		log.Printf("Google Photos integration disabled (no configuration provided)")
+	}
+
 	// Create scrapers for each album URL
 	albumScrapers := make([]*scraper.Scraper, 0, len(cfg.AlbumURLs))
 	for _, albumURL := range cfg.AlbumURLs {
@@ -54,7 +67,7 @@ func main() {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
 	// Run initial sync
-	runSync(albumScrapers, storageManager, redisClient, emailSender, cfg)
+	runSync(albumScrapers, storageManager, redisClient, emailSender, photosClient, cfg)
 
 	// Set up ticker for periodic runs
 	ticker := time.NewTicker(time.Duration(cfg.RunInterval) * time.Second)
@@ -64,7 +77,7 @@ func main() {
 	for {
 		select {
 		case <-ticker.C:
-			runSync(albumScrapers, storageManager, redisClient, emailSender, cfg)
+			runSync(albumScrapers, storageManager, redisClient, emailSender, photosClient, cfg)
 		case <-sigChan:
 			log.Println("Received shutdown signal, exiting...")
 			return
@@ -77,6 +90,7 @@ func runSync(
 	storageManager *storage.Manager,
 	redisClient *redis.Client,
 	emailSender *email.Sender,
+	photosClient *photos.Client,
 	cfg *config.Config,
 ) {
 	log.Println("Starting sync run...")
@@ -95,9 +109,22 @@ func runSync(
 
 	log.Printf("Found %d total image URLs across all albums", len(allImageURLs))
 
-	emailedCount := 0
+	// Get Google Photos album ID if configured (cache it for the run)
+	var googlePhotosAlbumID string
+	if photosClient != nil {
+		albumID, err := photosClient.GetOrFindAlbumID()
+		if err != nil {
+			log.Printf("Error finding Google Photos album: %v. Google Photos sync will be skipped for this run.", err)
+			photosClient = nil // Disable Google Photos for this run
+		} else {
+			googlePhotosAlbumID = albumID
+			log.Printf("Using Google Photos album ID: %s", googlePhotosAlbumID)
+		}
+	}
+
+	processedCount := 0
 	for _, imageURL := range allImageURLs {
-		if emailedCount >= cfg.MaxItems {
+		if processedCount >= cfg.MaxItems {
 			log.Printf("Reached MAX_ITEMS limit (%d), stopping for this run", cfg.MaxItems)
 			break
 		}
@@ -109,35 +136,66 @@ func runSync(
 			continue
 		}
 
-		// Check if we've already processed this image
-		exists, err := redisClient.HashExists(hash)
+		// Check if we've already processed this image for email
+		emailExists, err := redisClient.HashExistsForEmail(hash)
 		if err != nil {
-			log.Printf("Error checking Redis for hash %s: %v", hash, err)
+			log.Printf("Error checking Redis for email hash %s: %v", hash, err)
 			continue
 		}
 
-		if exists {
-			log.Printf("Image with hash %s already processed, skipping", hash)
+		if emailExists {
+			log.Printf("Image with hash %s already processed for email, skipping", hash)
 			continue
 		}
+
+		// Process new image: email and upload to Google Photos
+		emailSuccess := false
+		googlePhotosSuccess := false
 
 		// Email the new image
 		log.Printf("Emailing new image: %s (hash: %s)", imagePath, hash)
 		if err := emailSender.SendImage(imagePath, cfg.SMTPDestination); err != nil {
 			log.Printf("Error sending email for image %s: %v", imagePath, err)
-			continue
+		} else {
+			emailSuccess = true
 		}
 
-		// Mark as processed in Redis
-		if err := redisClient.SetHash(hash, imageURL); err != nil {
-			log.Printf("Error storing hash in Redis: %v", err)
-			// Continue anyway since email was sent
+		// Upload to Google Photos if configured
+		if photosClient != nil && googlePhotosAlbumID != "" {
+			// Check if already uploaded to Google Photos
+			gphotosExists, err := redisClient.HashExistsForGooglePhotos(hash)
+			if err != nil {
+				log.Printf("Error checking Redis for Google Photos hash %s: %v", hash, err)
+			} else if !gphotosExists {
+				log.Printf("Uploading new image to Google Photos: %s (hash: %s)", imagePath, hash)
+				if err := photosClient.UploadPhoto(imagePath, googlePhotosAlbumID); err != nil {
+					log.Printf("Error uploading to Google Photos for image %s: %v", imagePath, err)
+				} else {
+					googlePhotosSuccess = true
+					// Mark as processed for Google Photos
+					if err := redisClient.SetHashForGooglePhotos(hash, imageURL); err != nil {
+						log.Printf("Error storing Google Photos hash in Redis: %v", err)
+					}
+				}
+			} else {
+				log.Printf("Image with hash %s already uploaded to Google Photos, skipping upload", hash)
+				googlePhotosSuccess = true // Already processed
+			}
 		}
 
-		emailedCount++
-		log.Printf("Successfully processed image %s (hash: %s)", imagePath, hash)
+		// Mark as processed for email if email was sent successfully
+		if emailSuccess {
+			if err := redisClient.SetHashForEmail(hash, imageURL); err != nil {
+				log.Printf("Error storing email hash in Redis: %v", err)
+				// Continue anyway since email was sent
+			}
+		}
+
+		processedCount++
+		log.Printf("Successfully processed image %s (hash: %s) - Email: %v, Google Photos: %v", 
+			imagePath, hash, emailSuccess, googlePhotosSuccess)
 	}
 
-	log.Printf("Sync run completed. Emailed %d new images", emailedCount)
+	log.Printf("Sync run completed. Processed %d new images", processedCount)
 }
 
