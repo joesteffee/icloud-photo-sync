@@ -110,16 +110,22 @@ func runSync(
 	log.Printf("Found %d total image URLs across all albums", len(allImageURLs))
 
 	// Get Google Photos album ID if configured (cache it for the run)
-	// With new API scopes, the album will be created if it doesn't exist
+	// If AlbumName is not set, photos will be uploaded to library only (for partner sharing)
 	var googlePhotosAlbumID string
 	if photosClient != nil {
-		albumID, err := photosClient.GetOrCreateAlbumID()
-		if err != nil {
-			log.Printf("Error getting/creating Google Photos album: %v. Google Photos sync will be skipped for this run.", err)
-			photosClient = nil // Disable Google Photos for this run
+		if cfg.GooglePhotosConfig.AlbumName != "" {
+			// Album name is specified - get or create the album
+			albumID, err := photosClient.GetOrCreateAlbumID()
+			if err != nil {
+				log.Printf("Error getting/creating Google Photos album: %v. Google Photos sync will be skipped for this run.", err)
+				photosClient = nil // Disable Google Photos for this run
+			} else {
+				googlePhotosAlbumID = albumID
+				log.Printf("Using Google Photos album ID: %s", googlePhotosAlbumID)
+			}
 		} else {
-			googlePhotosAlbumID = albumID
-			log.Printf("Using Google Photos album ID: %s", googlePhotosAlbumID)
+			// No album name specified - upload to library only (for partner sharing)
+			log.Printf("No album name specified - photos will be uploaded to library only (partner sharing will work if enabled)")
 		}
 	}
 
@@ -152,7 +158,7 @@ func runSync(
 		log.Printf("Email tracking check for hash %s: exists=%v", hash, emailExists)
 
 		gphotosExists := false
-		if photosClient != nil && googlePhotosAlbumID != "" {
+		if photosClient != nil {
 			var err2 error
 			gphotosExists, err2 = redisClient.HashExistsForGooglePhotos(hash)
 			if err2 != nil {
@@ -191,8 +197,12 @@ func runSync(
 		}
 
 		// Upload to Google Photos if configured and not already uploaded
-		if photosClient != nil && googlePhotosAlbumID != "" && !gphotosExists {
-			log.Printf("Uploading high-quality image to Google Photos: %s (hash: %s)", imagePath, hash)
+		if photosClient != nil && !gphotosExists {
+			if googlePhotosAlbumID != "" {
+				log.Printf("Uploading high-quality image to Google Photos album: %s (hash: %s)", imagePath, hash)
+			} else {
+				log.Printf("Uploading high-quality image to Google Photos library (for partner sharing): %s (hash: %s)", imagePath, hash)
+			}
 			if err := photosClient.UploadPhoto(imagePath, googlePhotosAlbumID); err != nil {
 				log.Printf("Error uploading to Google Photos for image %s: %v", imagePath, err)
 			} else {
@@ -202,7 +212,7 @@ func runSync(
 					log.Printf("Error storing Google Photos hash in Redis: %v", err)
 				}
 			}
-		} else if photosClient != nil && googlePhotosAlbumID != "" && gphotosExists {
+		} else if photosClient != nil && gphotosExists {
 			log.Printf("Image with hash %s already uploaded to Google Photos, skipping upload", hash)
 			googlePhotosSuccess = true // Already processed
 		}

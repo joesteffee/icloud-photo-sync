@@ -57,9 +57,11 @@ You can specify multiple album URLs in the `album_urls` array. The service will 
 | `GOOGLE_PHOTOS_CLIENT_ID` | OAuth2 client ID for Google Photos API | No* | - |
 | `GOOGLE_PHOTOS_CLIENT_SECRET` | OAuth2 client secret for Google Photos API | No* | - |
 | `GOOGLE_PHOTOS_REFRESH_TOKEN` | OAuth2 refresh token for Google Photos API | No* | - |
-| `GOOGLE_PHOTOS_ALBUM_NAME` | Name of the pre-existing Google Photos album to upload to | No* | - |
+| `GOOGLE_PHOTOS_ALBUM_NAME` | Name of the Google Photos album to upload to. If not provided, photos are uploaded to library only (useful for partner sharing) | No** | - |
 
-\* Google Photos environment variables are optional. If any are provided, all must be provided. See [Setting Up Google Photos](#setting-up-google-photos) for detailed instructions.
+\* Google Photos environment variables are optional. If any of `GOOGLE_PHOTOS_CLIENT_ID`, `GOOGLE_PHOTOS_CLIENT_SECRET`, or `GOOGLE_PHOTOS_REFRESH_TOKEN` are provided, all three must be provided. See [Setting Up Google Photos](#setting-up-google-photos) for detailed instructions.
+
+\** `GOOGLE_PHOTOS_ALBUM_NAME` is optional. If not provided, photos are uploaded directly to your library (useful for partner sharing - see [Partner Sharing](#partner-sharing) below).
 
 ## Usage
 
@@ -335,7 +337,7 @@ Save this script, replace `CLIENT_ID` and `CLIENT_SECRET` with your values, run 
 5. **Important:** Remember the exact album name - it must match exactly (case-sensitive, including spaces and special characters)
 6. This name is your `GOOGLE_PHOTOS_ALBUM_NAME`
 
-**Note:** The album must exist before running the service. The service will look up the album by name and fail if it doesn't exist.
+**Note:** If you specify an album name, the album will be created automatically if it doesn't exist (due to API scope limitations, only app-created albums can be managed). Alternatively, you can omit the album name to upload photos directly to your library (useful for partner sharing - see [Partner Sharing](#partner-sharing) below).
 
 ### Step 5: Configure Environment Variables
 
@@ -348,13 +350,32 @@ export GOOGLE_PHOTOS_REFRESH_TOKEN="your-refresh-token-from-step-3"
 export GOOGLE_PHOTOS_ALBUM_NAME="your-album-name-from-step-4"
 ```
 
-**Important:** If any Google Photos environment variable is set, all four must be set, or the service will fail to start.
+**Important:** If any of `GOOGLE_PHOTOS_CLIENT_ID`, `GOOGLE_PHOTOS_CLIENT_SECRET`, or `GOOGLE_PHOTOS_REFRESH_TOKEN` are set, all three must be set. `GOOGLE_PHOTOS_ALBUM_NAME` is optional.
+
+### Partner Sharing
+
+If you want photos to automatically appear in a partner's Google Photos library (via Partner Sharing), you can upload photos directly to your library without adding them to an album.
+
+**To use Partner Sharing:**
+
+1. **Set up Partner Sharing in Google Photos** (must be done manually in the Google Photos app):
+   - Open Google Photos on your phone or web
+   - Go to Settings > Partner Sharing
+   - Invite your partner and configure what to share
+   - **Important:** Enable "Include content from other Android apps" (this includes content uploaded via API)
+
+2. **Configure the sync service** to upload to library only:
+   - Set `GOOGLE_PHOTOS_CLIENT_ID`, `GOOGLE_PHOTOS_CLIENT_SECRET`, and `GOOGLE_PHOTOS_REFRESH_TOKEN` as described above
+   - **Do NOT set `GOOGLE_PHOTOS_ALBUM_NAME`** (leave it unset or set to empty string)
+   - Photos will be uploaded directly to your library and automatically shared with your partner (if Partner Sharing is enabled)
+
+**Note:** The Google Photos API does not support programmatically managing Partner Sharing settings. Partner Sharing must be configured manually in the Google Photos app. Once enabled, photos uploaded via the API will automatically be shared with your partner.
 
 ## Troubleshooting
 
 ### Google Photos Issues
 
-- **"Album not found" error**: Verify the album name matches exactly (case-sensitive). Check the album name in Google Photos and ensure there are no extra spaces.
+- **"Album not found" error**: Verify the album name matches exactly (case-sensitive). Check the album name in Google Photos and ensure there are no extra spaces. If you're using partner sharing (no album), this error should not occur.
 - **"Invalid credentials" error**: Verify your Client ID, Client Secret, and Refresh Token are correct. Make sure the OAuth consent screen is properly configured.
 - **"API not enabled" error**: Ensure the Photos Library API is enabled in your Google Cloud project.
 - **Token refresh failures**: Refresh tokens don't expire unless revoked. If you get token errors, you may need to generate a new refresh token using the steps above.

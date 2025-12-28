@@ -206,7 +206,13 @@ func (c *Client) FindAlbumByName(albumName string) (string, error) {
 }
 
 // GetOrCreateAlbumID gets the album ID, creating it if it doesn't exist
+// Returns empty string if AlbumName is not configured (for library-only uploads/partner sharing)
 func (c *Client) GetOrCreateAlbumID() (string, error) {
+	// If no album name is configured, return empty string (upload to library only)
+	if c.config.AlbumName == "" {
+		return "", nil
+	}
+
 	c.albumMutex.RLock()
 	if c.albumID != "" {
 		cachedID := c.albumID
@@ -273,7 +279,8 @@ type BatchAddMediaItemsRequest struct {
 	MediaItemIds []string `json:"mediaItemIds"`
 }
 
-// UploadPhoto uploads a photo to Google Photos and adds it to the specified album
+// UploadPhoto uploads a photo to Google Photos and optionally adds it to an album
+// If albumID is empty, the photo is uploaded to the library only (useful for partner sharing)
 func (c *Client) UploadPhoto(imagePath string, albumID string) error {
 	// The HTTP client will automatically refresh the token if needed
 	// Step 1: Upload the media file
@@ -288,9 +295,11 @@ func (c *Client) UploadPhoto(imagePath string, albumID string) error {
 		return fmt.Errorf("failed to create media item: %w", err)
 	}
 
-	// Step 3: Add media item to album
-	if err := c.addMediaItemToAlbum(albumID, mediaItem.ID); err != nil {
-		return fmt.Errorf("failed to add media item to album: %w", err)
+	// Step 3: Add media item to album (if album ID is provided)
+	if albumID != "" {
+		if err := c.addMediaItemToAlbum(albumID, mediaItem.ID); err != nil {
+			return fmt.Errorf("failed to add media item to album: %w", err)
+		}
 	}
 
 	return nil

@@ -139,10 +139,11 @@ func Load() (*Config, error) {
 	googlePhotosClientID := os.Getenv("GOOGLE_PHOTOS_CLIENT_ID")
 	googlePhotosClientSecret := os.Getenv("GOOGLE_PHOTOS_CLIENT_SECRET")
 	googlePhotosRefreshToken := os.Getenv("GOOGLE_PHOTOS_REFRESH_TOKEN")
-	googlePhotosAlbumName := os.Getenv("GOOGLE_PHOTOS_ALBUM_NAME")
+	googlePhotosAlbumName := os.Getenv("GOOGLE_PHOTOS_ALBUM_NAME") // Optional - empty means upload to library only (for partner sharing)
 
-	// If any Google Photos env var is set, all must be set
-	if googlePhotosClientID != "" || googlePhotosClientSecret != "" || googlePhotosRefreshToken != "" || googlePhotosAlbumName != "" {
+	// If any Google Photos env var is set, ClientID, ClientSecret, and RefreshToken must all be set
+	// AlbumName is optional - if not provided, photos will be uploaded to library only
+	if googlePhotosClientID != "" || googlePhotosClientSecret != "" || googlePhotosRefreshToken != "" {
 		if googlePhotosClientID == "" {
 			return nil, fmt.Errorf("GOOGLE_PHOTOS_CLIENT_ID is required when Google Photos is enabled")
 		}
@@ -152,15 +153,13 @@ func Load() (*Config, error) {
 		if googlePhotosRefreshToken == "" {
 			return nil, fmt.Errorf("GOOGLE_PHOTOS_REFRESH_TOKEN is required when Google Photos is enabled")
 		}
-		if googlePhotosAlbumName == "" {
-			return nil, fmt.Errorf("GOOGLE_PHOTOS_ALBUM_NAME is required when Google Photos is enabled")
-		}
+		// AlbumName is optional - empty string means upload to library only (for partner sharing)
 
 		cfg.GooglePhotosConfig = &GooglePhotosConfig{
 			ClientID:     googlePhotosClientID,
 			ClientSecret: googlePhotosClientSecret,
 			RefreshToken: googlePhotosRefreshToken,
-			AlbumName:    googlePhotosAlbumName,
+			AlbumName:    googlePhotosAlbumName, // Empty string = upload to library only
 		}
 	}
 
