@@ -2,6 +2,7 @@ package scraper
 
 import (
 	"fmt"
+	"log"
 	"strings"
 
 	icloudalbum "github.com/Shogoki/icloud-shared-album-go"
@@ -55,34 +56,73 @@ func (s *Scraper) GetImageURLs() ([]string, error) {
 	}
 
 	var urls []string
-	for _, photo := range response.Photos {
+	skippedCount := 0
+	for i, photo := range response.Photos {
+		// Log available derivatives for debugging
+		availableDerivatives := make([]string, 0, len(photo.Derivatives))
+		for name := range photo.Derivatives {
+			availableDerivatives = append(availableDerivatives, name)
+		}
+		if len(availableDerivatives) > 0 {
+			log.Printf("Photo %d has derivatives: %v", i+1, availableDerivatives)
+		} else {
+			log.Printf("Photo %d has no derivatives", i+1)
+		}
+		
 		// Get the highest quality derivative available
 		// Priority: original > medium (skip thumbnail - not high quality enough)
 		// Only use high-quality versions for both email and Google Photos sync
 		var bestURL *string
 		var qualityUsed string
 		
+		// Helper function to find derivative by name (case-insensitive)
+		findDerivative := func(name string) (*icloudalbum.Derivative, bool) {
+			// Try exact match first
+			if deriv, ok := photo.Derivatives[name]; ok {
+				return &deriv, true
+			}
+			// Try case-insensitive match
+			for key, deriv := range photo.Derivatives {
+				if strings.EqualFold(key, name) {
+					return &deriv, true
+				}
+			}
+			return nil, false
+		}
+		
 		// Try original first (highest quality)
-		if derivative, ok := photo.Derivatives["original"]; ok && derivative.URL != nil {
+		if derivative, ok := findDerivative("original"); ok && derivative.URL != nil {
 			bestURL = derivative.URL
 			qualityUsed = "original"
-		} else if derivative, ok := photo.Derivatives["medium"]; ok && derivative.URL != nil {
+			log.Printf("Photo %d: Using 'original' quality", i+1)
+		} else if derivative, ok := findDerivative("medium"); ok && derivative.URL != nil {
 			// Fall back to medium if original not available
 			bestURL = derivative.URL
 			qualityUsed = "medium"
+			log.Printf("Photo %d: Using 'medium' quality (original not available)", i+1)
 		}
 		
 		// Skip thumbnail - not high quality enough for email/Google Photos
 		// If neither original nor medium is available, skip this photo
 		if bestURL == nil {
-			// Log that we're skipping due to insufficient quality
+			// Check if only thumbnail is available
+			if _, hasThumbnail := photo.Derivatives["thumbnail"]; hasThumbnail {
+				log.Printf("Photo %d: Skipping - only 'thumbnail' quality available (not high quality enough)", i+1)
+			} else {
+				log.Printf("Photo %d: Skipping - no 'original' or 'medium' derivative found. Available: %v", i+1, availableDerivatives)
+			}
+			skippedCount++
 			continue
 		}
 		
 		urls = append(urls, *bestURL)
-		// Note: Quality logging can be added here if needed for debugging
-		_ = qualityUsed // Quality used for this image (original or medium)
+		log.Printf("Photo %d: Added URL with quality '%s'", i+1, qualityUsed)
 	}
+	
+	if skippedCount > 0 {
+		log.Printf("Skipped %d photos due to insufficient quality (only thumbnail or no original/medium available)", skippedCount)
+	}
+	log.Printf("Total photos processed: %d, URLs extracted: %d", len(response.Photos), len(urls))
 
 	return urls, nil
 }
