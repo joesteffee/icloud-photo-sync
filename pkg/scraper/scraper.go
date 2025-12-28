@@ -3,6 +3,7 @@ package scraper
 import (
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 
 	icloudalbum "github.com/Shogoki/icloud-shared-album-go"
@@ -70,10 +71,11 @@ func (s *Scraper) GetImageURLs() ([]string, error) {
 		}
 		
 		// Get the highest quality derivative available
-		// Priority: original > medium (skip thumbnail - not high quality enough)
-		// Only use high-quality versions for both email and Google Photos sync
+		// Priority: named "original" > named "medium" > highest numeric key (width) > other named keys
+		// Skip "thumbnail" and small numeric keys (< 1000 pixels) - not high quality enough
 		var bestURL *string
 		var qualityUsed string
+		var bestWidth int
 		
 		// Helper function to find derivative by name (case-insensitive)
 		findDerivative := func(name string) (*icloudalbum.Derivative, bool) {
@@ -90,26 +92,84 @@ func (s *Scraper) GetImageURLs() ([]string, error) {
 			return nil, false
 		}
 		
-		// Try original first (highest quality)
+		// Try named "original" first (highest quality)
 		if derivative, ok := findDerivative("original"); ok && derivative.URL != nil {
 			bestURL = derivative.URL
 			qualityUsed = "original"
 			log.Printf("Photo %d: Using 'original' quality", i+1)
 		} else if derivative, ok := findDerivative("medium"); ok && derivative.URL != nil {
-			// Fall back to medium if original not available
+			// Fall back to named "medium" if original not available
 			bestURL = derivative.URL
 			qualityUsed = "medium"
 			log.Printf("Photo %d: Using 'medium' quality (original not available)", i+1)
+		} else {
+			// No named derivatives found, look for numeric keys (pixel widths)
+			// Find the highest numeric key (largest width = highest quality)
+			for key, deriv := range photo.Derivatives {
+				// Skip thumbnail and other named keys we don't want
+				if strings.EqualFold(key, "thumbnail") {
+					continue
+				}
+				
+				// Try to parse as numeric (pixel width)
+				if width, err := strconv.Atoi(key); err == nil {
+					// Only consider high-quality derivatives (>= 1000 pixels wide)
+					// This filters out thumbnails which are typically 342px or smaller
+					if width >= 1000 && deriv.URL != nil {
+						if width > bestWidth {
+							bestWidth = width
+							bestURL = deriv.URL
+							qualityUsed = fmt.Sprintf("%dpx", width)
+						}
+					}
+				} else {
+					// Not a numeric key and not thumbnail - might be another named quality
+					// Only use if it's not a known low-quality name
+					lowQualityNames := []string{"thumbnail", "small", "preview"}
+					isLowQuality := false
+					for _, lowName := range lowQualityNames {
+						if strings.EqualFold(key, lowName) {
+							isLowQuality = true
+							break
+						}
+					}
+					if !isLowQuality && deriv.URL != nil && bestURL == nil {
+						// Use as fallback if no better option found
+						bestURL = deriv.URL
+						qualityUsed = key
+					}
+				}
+			}
+			
+			if bestURL != nil {
+				log.Printf("Photo %d: Using numeric derivative with quality '%s'", i+1, qualityUsed)
+			}
 		}
 		
-		// Skip thumbnail - not high quality enough for email/Google Photos
-		// If neither original nor medium is available, skip this photo
+		// Skip if no high-quality derivative found
 		if bestURL == nil {
-			// Check if only thumbnail is available
-			if _, hasThumbnail := photo.Derivatives["thumbnail"]; hasThumbnail {
-				log.Printf("Photo %d: Skipping - only 'thumbnail' quality available (not high quality enough)", i+1)
+			// Check if only thumbnail or small derivatives are available
+			hasOnlySmall := true
+			for key := range photo.Derivatives {
+				if strings.EqualFold(key, "thumbnail") {
+					continue
+				}
+				if width, err := strconv.Atoi(key); err == nil {
+					if width >= 1000 {
+						hasOnlySmall = false
+						break
+					}
+				} else {
+					// Named key that's not thumbnail - might be usable
+					hasOnlySmall = false
+					break
+				}
+			}
+			
+			if hasOnlySmall {
+				log.Printf("Photo %d: Skipping - only thumbnail or small derivatives available (< 1000px). Available: %v", i+1, availableDerivatives)
 			} else {
-				log.Printf("Photo %d: Skipping - no 'original' or 'medium' derivative found. Available: %v", i+1, availableDerivatives)
+				log.Printf("Photo %d: Skipping - no usable derivative found. Available: %v", i+1, availableDerivatives)
 			}
 			skippedCount++
 			continue
