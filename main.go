@@ -139,65 +139,73 @@ func runSync(
 			continue
 		}
 
-		// Check if we've already processed this image for email
+		// Check processing status for both email and Google Photos independently
 		emailExists, err := redisClient.HashExistsForEmail(hash)
 		if err != nil {
 			log.Printf("Error checking Redis for email hash %s: %v", hash, err)
 			continue
 		}
 
-		if emailExists {
-			log.Printf("Image with hash %s already processed for email, skipping", hash)
+		gphotosExists := false
+		if photosClient != nil && googlePhotosAlbumID != "" {
+			var err2 error
+			gphotosExists, err2 = redisClient.HashExistsForGooglePhotos(hash)
+			if err2 != nil {
+				log.Printf("Error checking Redis for Google Photos hash %s: %v", hash, err2)
+			}
+		}
+
+		// Skip if already processed for both services
+		if emailExists && (photosClient == nil || gphotosExists) {
+			log.Printf("Image with hash %s already processed for all services, skipping", hash)
 			continue
 		}
 
-		// Process new image: email and upload to Google Photos
+		// Process image for email and/or Google Photos as needed
 		// Both services use the same high-quality downloaded image file
 		emailSuccess := false
 		googlePhotosSuccess := false
 
-		// Email the new high-quality image
-		log.Printf("Emailing new high-quality image: %s (hash: %s)", imagePath, hash)
-		if err := emailSender.SendImage(imagePath, cfg.SMTPDestination); err != nil {
-			log.Printf("Error sending email for image %s: %v", imagePath, err)
-		} else {
-			emailSuccess = true
-		}
-
-		// Upload the same high-quality image to Google Photos if configured
-		if photosClient != nil && googlePhotosAlbumID != "" {
-			// Check if already uploaded to Google Photos
-			gphotosExists, err := redisClient.HashExistsForGooglePhotos(hash)
-			if err != nil {
-				log.Printf("Error checking Redis for Google Photos hash %s: %v", hash, err)
-			} else if !gphotosExists {
-				log.Printf("Uploading new high-quality image to Google Photos: %s (hash: %s)", imagePath, hash)
-				if err := photosClient.UploadPhoto(imagePath, googlePhotosAlbumID); err != nil {
-					log.Printf("Error uploading to Google Photos for image %s: %v", imagePath, err)
-				} else {
-					googlePhotosSuccess = true
-					// Mark as processed for Google Photos
-					if err := redisClient.SetHashForGooglePhotos(hash, imageURL); err != nil {
-						log.Printf("Error storing Google Photos hash in Redis: %v", err)
-					}
-				}
+		// Email the image if not already emailed
+		if !emailExists {
+			log.Printf("Emailing high-quality image: %s (hash: %s)", imagePath, hash)
+			if err := emailSender.SendImage(imagePath, cfg.SMTPDestination); err != nil {
+				log.Printf("Error sending email for image %s: %v", imagePath, err)
 			} else {
-				log.Printf("Image with hash %s already uploaded to Google Photos, skipping upload", hash)
-				googlePhotosSuccess = true // Already processed
+				emailSuccess = true
+				// Mark as processed for email
+				if err := redisClient.SetHashForEmail(hash, imageURL); err != nil {
+					log.Printf("Error storing email hash in Redis: %v", err)
+				}
 			}
+		} else {
+			log.Printf("Image with hash %s already emailed, skipping email", hash)
+			emailSuccess = true // Already processed
 		}
 
-		// Mark as processed for email if email was sent successfully
-		if emailSuccess {
-			if err := redisClient.SetHashForEmail(hash, imageURL); err != nil {
-				log.Printf("Error storing email hash in Redis: %v", err)
-				// Continue anyway since email was sent
+		// Upload to Google Photos if configured and not already uploaded
+		if photosClient != nil && googlePhotosAlbumID != "" && !gphotosExists {
+			log.Printf("Uploading high-quality image to Google Photos: %s (hash: %s)", imagePath, hash)
+			if err := photosClient.UploadPhoto(imagePath, googlePhotosAlbumID); err != nil {
+				log.Printf("Error uploading to Google Photos for image %s: %v", imagePath, err)
+			} else {
+				googlePhotosSuccess = true
+				// Mark as processed for Google Photos
+				if err := redisClient.SetHashForGooglePhotos(hash, imageURL); err != nil {
+					log.Printf("Error storing Google Photos hash in Redis: %v", err)
+				}
 			}
+		} else if photosClient != nil && googlePhotosAlbumID != "" && gphotosExists {
+			log.Printf("Image with hash %s already uploaded to Google Photos, skipping upload", hash)
+			googlePhotosSuccess = true // Already processed
 		}
 
-		processedCount++
-		log.Printf("Successfully processed image %s (hash: %s) - Email: %v, Google Photos: %v", 
-			imagePath, hash, emailSuccess, googlePhotosSuccess)
+		// Only count as processed if we actually did something new
+		if emailSuccess || googlePhotosSuccess {
+			processedCount++
+			log.Printf("Successfully processed image %s (hash: %s) - Email: %v, Google Photos: %v", 
+				imagePath, hash, emailSuccess, googlePhotosSuccess)
+		}
 	}
 
 	log.Printf("Sync run completed. Processed %d new images", processedCount)
