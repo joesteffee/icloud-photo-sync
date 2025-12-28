@@ -124,11 +124,14 @@ func runSync(
 	}
 
 	processedCount := 0
-	for _, imageURL := range allImageURLs {
+	log.Printf("Starting to process %d image URLs", len(allImageURLs))
+	for i, imageURL := range allImageURLs {
 		if processedCount >= cfg.MaxItems {
 			log.Printf("Reached MAX_ITEMS limit (%d), stopping for this run", cfg.MaxItems)
 			break
 		}
+
+		log.Printf("Processing image %d/%d: %s", i+1, len(allImageURLs), imageURL)
 
 		// Download and hash the image (high-quality version only - original or medium)
 		// The scraper ensures only high-quality images are selected (skips thumbnails)
@@ -138,6 +141,7 @@ func runSync(
 			log.Printf("Error downloading image %s: %v", imageURL, err)
 			continue
 		}
+		log.Printf("Downloaded and hashed image: %s (hash: %s)", imagePath, hash)
 
 		// Check processing status for both email and Google Photos independently
 		emailExists, err := redisClient.HashExistsForEmail(hash)
@@ -145,6 +149,7 @@ func runSync(
 			log.Printf("Error checking Redis for email hash %s: %v", hash, err)
 			continue
 		}
+		log.Printf("Email tracking check for hash %s: exists=%v", hash, emailExists)
 
 		gphotosExists := false
 		if photosClient != nil && googlePhotosAlbumID != "" {
@@ -152,6 +157,8 @@ func runSync(
 			gphotosExists, err2 = redisClient.HashExistsForGooglePhotos(hash)
 			if err2 != nil {
 				log.Printf("Error checking Redis for Google Photos hash %s: %v", hash, err2)
+			} else {
+				log.Printf("Google Photos tracking check for hash %s: exists=%v", hash, gphotosExists)
 			}
 		}
 
@@ -204,6 +211,9 @@ func runSync(
 		if emailSuccess || googlePhotosSuccess {
 			processedCount++
 			log.Printf("Successfully processed image %s (hash: %s) - Email: %v, Google Photos: %v", 
+				imagePath, hash, emailSuccess, googlePhotosSuccess)
+		} else {
+			log.Printf("Failed to process image %s (hash: %s) for both email and Google Photos - Email: %v, Google Photos: %v", 
 				imagePath, hash, emailSuccess, googlePhotosSuccess)
 		}
 	}
