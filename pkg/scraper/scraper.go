@@ -57,28 +57,31 @@ func (s *Scraper) GetImageURLs() ([]string, error) {
 	var urls []string
 	for _, photo := range response.Photos {
 		// Get the highest quality derivative available
-		// Priority: original > medium > thumbnail
+		// Priority: original > medium (skip thumbnail - not high quality enough)
+		// Only use high-quality versions for both email and Google Photos sync
 		var bestURL *string
-		for _, size := range []string{"original", "medium", "thumbnail"} {
-			if derivative, ok := photo.Derivatives[size]; ok && derivative.URL != nil {
-				bestURL = derivative.URL
-				break // Use first available (original is preferred)
-			}
+		var qualityUsed string
+		
+		// Try original first (highest quality)
+		if derivative, ok := photo.Derivatives["original"]; ok && derivative.URL != nil {
+			bestURL = derivative.URL
+			qualityUsed = "original"
+		} else if derivative, ok := photo.Derivatives["medium"]; ok && derivative.URL != nil {
+			// Fall back to medium if original not available
+			bestURL = derivative.URL
+			qualityUsed = "medium"
 		}
 		
-		// If no named size found, try to get any derivative with a URL
+		// Skip thumbnail - not high quality enough for email/Google Photos
+		// If neither original nor medium is available, skip this photo
 		if bestURL == nil {
-			for _, derivative := range photo.Derivatives {
-				if derivative.URL != nil {
-					bestURL = derivative.URL
-					break
-				}
-			}
+			// Log that we're skipping due to insufficient quality
+			continue
 		}
 		
-		if bestURL != nil {
-			urls = append(urls, *bestURL)
-		}
+		urls = append(urls, *bestURL)
+		// Note: Quality logging can be added here if needed for debugging
+		_ = qualityUsed // Quality used for this image (original or medium)
 	}
 
 	return urls, nil

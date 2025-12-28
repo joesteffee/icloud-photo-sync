@@ -130,7 +130,9 @@ func runSync(
 			break
 		}
 
-		// Download and hash the image
+		// Download and hash the image (high-quality version only - original or medium)
+		// The scraper ensures only high-quality images are selected (skips thumbnails)
+		// This same high-quality image will be used for both email and Google Photos
 		imagePath, hash, err := storageManager.DownloadAndHash(imageURL)
 		if err != nil {
 			log.Printf("Error downloading image %s: %v", imageURL, err)
@@ -150,25 +152,26 @@ func runSync(
 		}
 
 		// Process new image: email and upload to Google Photos
+		// Both services use the same high-quality downloaded image file
 		emailSuccess := false
 		googlePhotosSuccess := false
 
-		// Email the new image
-		log.Printf("Emailing new image: %s (hash: %s)", imagePath, hash)
+		// Email the new high-quality image
+		log.Printf("Emailing new high-quality image: %s (hash: %s)", imagePath, hash)
 		if err := emailSender.SendImage(imagePath, cfg.SMTPDestination); err != nil {
 			log.Printf("Error sending email for image %s: %v", imagePath, err)
 		} else {
 			emailSuccess = true
 		}
 
-		// Upload to Google Photos if configured
+		// Upload the same high-quality image to Google Photos if configured
 		if photosClient != nil && googlePhotosAlbumID != "" {
 			// Check if already uploaded to Google Photos
 			gphotosExists, err := redisClient.HashExistsForGooglePhotos(hash)
 			if err != nil {
 				log.Printf("Error checking Redis for Google Photos hash %s: %v", hash, err)
 			} else if !gphotosExists {
-				log.Printf("Uploading new image to Google Photos: %s (hash: %s)", imagePath, hash)
+				log.Printf("Uploading new high-quality image to Google Photos: %s (hash: %s)", imagePath, hash)
 				if err := photosClient.UploadPhoto(imagePath, googlePhotosAlbumID); err != nil {
 					log.Printf("Error uploading to Google Photos for image %s: %v", imagePath, err)
 				} else {
